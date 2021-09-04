@@ -16,16 +16,16 @@ object Main {
                     // Name of the game
                     gameName = "My Game",
                     // Screen configuration used for your game (ie: how should render your game)
-                    gameScreenConfiguration = GameScreenConfiguration.WithRatio(16f / 9f),
+                    gameScreenConfiguration = GameScreenConfiguration.WithRatio(9f / 16f),
                     // Is your game should use show debug information? (hitbox, ...)
-                    debug = false,
+                    debug = true,
                     // (JVM Specific configuration)
                     // Configuration of the window use to render your game
                     window = Window(
                         // Width of the window
-                        1024,
-                        // Height of the window
                         (1024 * 9f / 16f).toInt(),
+                        // Height of the window
+                        1024,
                         // Name of the window
                         "My Game - running on the JVM"
                     )

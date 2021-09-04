@@ -23,3 +23,5 @@ pluginManagement {
         jcenter()
     }
 }
+
+includeBuild("../3d-skeleton")
