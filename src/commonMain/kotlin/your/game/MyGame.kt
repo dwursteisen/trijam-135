@@ -3,10 +3,7 @@ package your.game
 import com.github.dwursteisen.minigdx.GameContext
 import com.github.dwursteisen.minigdx.Seconds
 import com.github.dwursteisen.minigdx.ecs.Engine
-import com.github.dwursteisen.minigdx.ecs.components.BoundingBoxComponent
 import com.github.dwursteisen.minigdx.ecs.components.Component
-import com.github.dwursteisen.minigdx.ecs.components.ModelComponent
-import com.github.dwursteisen.minigdx.ecs.components.Position
 import com.github.dwursteisen.minigdx.ecs.entities.Entity
 import com.github.dwursteisen.minigdx.ecs.entities.EntityFactory
 import com.github.dwursteisen.minigdx.ecs.entities.position
@@ -24,9 +21,7 @@ import kotlin.random.Random
 
 class Player : Component
 class Circle : Component
-class CircleModel : Component
 class Cube : Component
-class CubeModel : Component
 
 class Generator : Component
 class Hit : Component
@@ -53,23 +48,14 @@ class GeneratorSystem() : TemporalSystem(0.5f, query = EntityQuery.none()) {
     }
 }
 
-class CircleSystem(private val engine: Engine) : System(EntityQuery.of(Circle::class)) {
+class CircleSystem : System(EntityQuery.of(Circle::class)) {
 
     val destroyers by interested(EntityQuery.of(Destroy::class))
-
-    val models by interested(EntityQuery.of(CircleModel::class))
-    val cubeModels by interested(EntityQuery.of(CubeModel::class))
 
     var limit: Float = 0f
 
     override fun onGameStarted(engine: Engine) {
         limit = destroyers.first().position.translation.y
-        models.forEach {
-            it.position.setLocalTranslation(z = 1f) // put it behind the camera
-        }
-        cubeModels.forEach {
-            it.position.setLocalTranslation(z = 1f)
-        }
     }
 
     override fun update(delta: Seconds, entity: Entity) {
@@ -83,29 +69,14 @@ class CircleSystem(private val engine: Engine) : System(EntityQuery.of(Circle::c
 
     override fun onEvent(event: Event, entityQuery: EntityQuery?) {
         if (event is CreateCircle) {
-            val entity = engine.create {
-                val model = models.first().components.filter { it is ModelComponent }.first() as ModelComponent
-                add(model)
-                add(Circle())
-                add(Position().setLocalTransform(models.first().position.transformation))
-                add(models.first().components.filter { it is BoundingBoxComponent })
-            }
-
+            val entity = entityFactory.createFromTemplate("circle")
             entity.position.setLocalTranslation(
                 event.position.x,
                 event.position.y,
                 event.position.z
             )
         } else if (event is CreateCube) {
-            val entity = engine.create {
-                val model = cubeModels.first().components.filter { it is ModelComponent }.first() as ModelComponent
-                add(model)
-                add(Circle())
-                add(Cube())
-                add(Position().setLocalTransform(cubeModels.first().position.transformation))
-                add(BoundingBoxComponent.from(model.model))
-            }
-
+            val entity = entityFactory.createFromTemplate("cube")
             entity.position.setLocalTranslation(
                 event.position.x,
                 event.position.y,
@@ -162,19 +133,33 @@ class MyGame(override val gameContext: GameContext) : Game {
         // The scene is the node graph that can be updated in Blender
         scene.nodes.forEach { node ->
             // Create an entity using all information from this node (model, position, camera, ...)
-            val entity = entityFactory.createFromNode(node)
-            if (entity.name.startsWith("hit")) {
+            if (node.name.startsWith("hit")) {
+                val entity = entityFactory.createFromNode(node)
                 entity.add(Hit())
-            } else if (entity.name.startsWith("player")) {
+            } else if (node.name.startsWith("player")) {
+                val entity = entityFactory.createFromNode(node)
                 entity.add(Player())
-            } else if (entity.name.startsWith("destroy")) {
+            } else if (node.name.startsWith("destroy")) {
+                val entity = entityFactory.createFromNode(node)
                 entity.add(Destroy())
-            } else if (entity.name.startsWith("circle")) {
-                entity.add(CircleModel())
-            } else if (entity.name.startsWith("generator")) {
+            } else if (node.name.startsWith("circle")) {
+                entityFactory.registerTemplate("circle") {
+                    val entity = entityFactory.createFromNode(node)
+                    entity.add(Circle())
+                    entity
+                }
+            } else if (node.name.startsWith("generator")) {
+                val entity = entityFactory.createFromNode(node)
                 entity.add(Generator())
-            } else if (entity.name.startsWith("cube")) {
-                entity.add(CubeModel())
+            } else if (node.name.startsWith("cube")) {
+                entityFactory.registerTemplate("cube") {
+                    val entity = entityFactory.createFromNode(node)
+                    entity.add(Cube())
+                    entity.add(Circle())
+                    entity
+                }
+            } else {
+                entityFactory.createFromNode(node)
             }
         }
     }
@@ -183,7 +168,7 @@ class MyGame(override val gameContext: GameContext) : Game {
         // Create all systems used by the game
         return listOf(
             PlayerSystem(),
-            CircleSystem(engine),
+            CircleSystem(),
             GeneratorSystem()
         )
     }
