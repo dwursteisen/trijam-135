@@ -8,6 +8,7 @@ import com.github.dwursteisen.minigdx.ecs.entities.Entity
 import com.github.dwursteisen.minigdx.ecs.entities.EntityFactory
 import com.github.dwursteisen.minigdx.ecs.entities.position
 import com.github.dwursteisen.minigdx.ecs.events.Event
+import com.github.dwursteisen.minigdx.ecs.physics.AABBCollisionResolver
 import com.github.dwursteisen.minigdx.ecs.systems.EntityQuery
 import com.github.dwursteisen.minigdx.ecs.systems.System
 import com.github.dwursteisen.minigdx.ecs.systems.TemporalSystem
@@ -20,17 +21,67 @@ import com.github.dwursteisen.minigdx.math.Interpolations
 import kotlin.random.Random
 
 class Player : Component
-class Circle : Component
-class Cube : Component
+class Circle(var touched: Boolean = false) : Component
+class Square(var touched: Boolean = false) : Component
+class Movable : Component
 
 class Generator : Component
 class Hit : Component
 class Destroy : Component
 
 class CreateCircle(var position: ImmutableVector3) : Event
-class CreateCube(var position: ImmutableVector3) : Event
+class CreateSquare(var position: ImmutableVector3) : Event
 
-class GeneratorSystem() : TemporalSystem(0.5f, query = EntityQuery.none()) {
+object HitCircle : Event
+object HitSquare : Event
+class StopGame(score: Int) : Event
+
+class ScoreSystem : System(EntityQuery.none()) {
+
+    var score = 0
+
+    override fun update(delta: Seconds, entity: Entity) = Unit
+
+    override fun onEvent(event: Event, entityQuery: EntityQuery?) {
+        if (event is HitSquare) {
+            println("Stop")
+            emit(StopGame(score))
+            score = 0
+        } else if (event is HitCircle) {
+            score += 10
+            println("Score: $score")
+        }
+    }
+}
+
+class HitSystem : System(EntityQuery.of(Hit::class)) {
+
+    val players by interested(EntityQuery.of(Player::class))
+    val circles by interested(EntityQuery.of(Circle::class))
+    val square by interested(EntityQuery.of(Square::class))
+
+    private val collider = AABBCollisionResolver()
+
+    override fun update(delta: Seconds, entity: Entity) {
+
+        if (collider.collide(entity, players.first())) {
+            val firstOrNull =
+                circles.filter { !it.get(Circle::class).touched }.firstOrNull { collider.collide(entity, it) }
+            if (firstOrNull != null) {
+                firstOrNull.get(Circle::class).touched = true
+                emit(HitCircle)
+            } else {
+                val any = square.filter { !it.get(Square::class).touched }.firstOrNull { collider.collide(entity, it) }
+                if (any != null) {
+                    any.get(Square::class).touched = true
+                    emit(HitSquare)
+                }
+            }
+        }
+    }
+}
+
+class GeneratorSystem() : TemporalSystem(0.3f, query = EntityQuery.none()) {
 
     val generators by interested(EntityQuery.of(Generator::class))
 
@@ -43,12 +94,12 @@ class GeneratorSystem() : TemporalSystem(0.5f, query = EntityQuery.none()) {
         if (randomValue < 0.5f) {
             emit(CreateCircle(generator.position.translation))
         } else if (randomValue < 0.75) {
-            emit(CreateCube(generator.position.translation))
+            emit(CreateSquare(generator.position.translation))
         }
     }
 }
 
-class CircleSystem : System(EntityQuery.of(Circle::class)) {
+class CircleSystem : System(EntityQuery.of(Movable::class)) {
 
     val destroyers by interested(EntityQuery.of(Destroy::class))
 
@@ -59,7 +110,7 @@ class CircleSystem : System(EntityQuery.of(Circle::class)) {
     }
 
     override fun update(delta: Seconds, entity: Entity) {
-        entity.position.addLocalTranslation(y = -2f, delta = delta)
+        entity.position.addLocalTranslation(y = -4f, delta = delta)
 
         // Out of the screen
         if (entity.position.translation.y <= limit) {
@@ -75,7 +126,7 @@ class CircleSystem : System(EntityQuery.of(Circle::class)) {
                 event.position.y,
                 event.position.z
             )
-        } else if (event is CreateCube) {
+        } else if (event is CreateSquare) {
             val entity = entityFactory.createFromTemplate("cube")
             entity.position.setLocalTranslation(
                 event.position.x,
@@ -146,6 +197,7 @@ class MyGame(override val gameContext: GameContext) : Game {
                 entityFactory.registerTemplate("circle") {
                     val entity = entityFactory.createFromNode(node)
                     entity.add(Circle())
+                    entity.add(Movable())
                     entity
                 }
             } else if (node.name.startsWith("generator")) {
@@ -154,8 +206,8 @@ class MyGame(override val gameContext: GameContext) : Game {
             } else if (node.name.startsWith("cube")) {
                 entityFactory.registerTemplate("cube") {
                     val entity = entityFactory.createFromNode(node)
-                    entity.add(Cube())
-                    entity.add(Circle())
+                    entity.add(Square())
+                    entity.add(Movable())
                     entity
                 }
             } else {
@@ -169,7 +221,9 @@ class MyGame(override val gameContext: GameContext) : Game {
         return listOf(
             PlayerSystem(),
             CircleSystem(),
-            GeneratorSystem()
+            GeneratorSystem(),
+            HitSystem(),
+            ScoreSystem()
         )
     }
 }
