@@ -1,15 +1,13 @@
 package your.game
 
 import com.curiouscreature.kotlin.math.Mat4
-import com.curiouscreature.kotlin.math.rotation
-import com.curiouscreature.kotlin.math.scale
+import com.curiouscreature.kotlin.math.min
 import com.curiouscreature.kotlin.math.translation
 import com.github.dwursteisen.minigdx.GameContext
 import com.github.dwursteisen.minigdx.Seconds
 import com.github.dwursteisen.minigdx.ecs.Engine
 import com.github.dwursteisen.minigdx.ecs.components.Component
 import com.github.dwursteisen.minigdx.ecs.components.HorizontalAlignment
-import com.github.dwursteisen.minigdx.ecs.components.Position
 import com.github.dwursteisen.minigdx.ecs.components.TextComponent
 import com.github.dwursteisen.minigdx.ecs.components.text.WriteText
 import com.github.dwursteisen.minigdx.ecs.entities.Entity
@@ -21,12 +19,18 @@ import com.github.dwursteisen.minigdx.ecs.systems.EntityQuery
 import com.github.dwursteisen.minigdx.ecs.systems.System
 import com.github.dwursteisen.minigdx.ecs.systems.TemporalSystem
 import com.github.dwursteisen.minigdx.file.Font
+import com.github.dwursteisen.minigdx.file.Texture
 import com.github.dwursteisen.minigdx.file.get
 import com.github.dwursteisen.minigdx.game.Game
 import com.github.dwursteisen.minigdx.graph.GraphScene
+import com.github.dwursteisen.minigdx.imgui.ImGuiSystem
 import com.github.dwursteisen.minigdx.input.Key
 import com.github.dwursteisen.minigdx.math.ImmutableVector3
 import com.github.dwursteisen.minigdx.math.Interpolations
+import com.github.minigdx.imgui.WidgetBuilder
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 class Player : Component
@@ -40,7 +44,10 @@ class Destroy : Component
 class Score : Component
 class Disappear(var ttl: Seconds = 0.5f) : Component
 class TargetSquare(val target: Mat4) : Component
-class SquareHit(val start: Mat4, val target: Mat4, val duration: Seconds = 0.5f, var ttl: Seconds = duration) : Component
+class SquareHit(val start: Mat4, val target: Mat4, val duration: Seconds = 0.5f, var ttl: Seconds = duration) :
+    Component
+
+class Blend(var percent: Float) : Component
 
 class CreateCircle(var position: ImmutableVector3) : Event
 class CreateSquare(var position: ImmutableVector3) : Event
@@ -48,6 +55,42 @@ class CreateSquare(var position: ImmutableVector3) : Event
 object HitCircle : Event
 object HitSquare : Event
 class StopGame(score: Int) : Event
+
+class InterpolationSystem : System(EntityQuery.of(Blend::class)) {
+
+    val squares by interested(EntityQuery.of(Square::class))
+
+    override fun update(delta: Seconds, entity: Entity) {
+        val (a, b) = squares
+
+        val blend = entity.get(Blend::class).percent
+        val interpo = Interpolations.interpolate(b.position.localTransformation, a.position.localTransformation, blend)
+        // entity.position.setLocalScale(interpo.scale.x, interpo.scale.y, interpo.scale.z)
+        // entity.position.setLocalRotation(interpo.rotation.x, interpo.rotation.y, interpo.rotation.z)
+        // entity.position.setLocalTranslation(interpo.translation.x, interpo.translation.y, interpo.translation.z)
+        entity.position.setLocalTransform(interpo)
+        if (input.isKeyPressed(Key.ARROW_RIGHT)) {
+            entity.get(Blend::class).percent += 0.3f * delta
+        } else if (input.isKeyPressed(Key.ARROW_LEFT)) {
+            entity.get(Blend::class).percent -= 0.3f * delta
+        }
+
+        entity.get(Blend::class).percent = max(0.0f, min(entity.get(Blend::class).percent, 1.0f))
+    }
+}
+
+class DebugSystem : ImGuiSystem() {
+
+    val blend by interested(EntityQuery.of(Blend::class))
+
+    override fun gui(builder: WidgetBuilder<Texture>) {
+        builder.verticalContainer {
+            blend.forEach {
+                button(label = "Blend: " + (it.get(Blend::class).percent * 100).roundToInt())
+            }
+        }
+    }
+}
 
 class ScoreSystem : System(EntityQuery.of(Score::class)) {
 
@@ -93,9 +136,13 @@ class HitSystem : System(EntityQuery.of(Hit::class)) {
                 if (target != null) {
                     target.get(Square::class).touched = true
                     target.remove(Movable::class)
-                    target.add(SquareHit(target.position.localTransformation, targetSquare.first().get(TargetSquare::class).target))
+                    target.add(
+                        SquareHit(
+                            target.position.localTransformation,
+                            targetSquare.first().get(TargetSquare::class).target
+                        )
+                    )
                     emit(HitSquare)
-
                 }
             }
         }
@@ -107,14 +154,13 @@ class SquareHitSystem : System(EntityQuery.of(SquareHit::class)) {
     override fun update(delta: Seconds, entity: Entity) {
         val squareHit = entity.get(SquareHit::class)
         squareHit.ttl -= delta
-        val blend = 1f - squareHit.ttl / squareHit.duration
+        val blend = min(1f - squareHit.ttl / squareHit.duration, 1f)
         val interpolate = Interpolations.interpolate(
             target = squareHit.target,
             start = squareHit.start,
             blend = blend
         )
-        // FIXME: bug interpolation around here
-         entity.position.setLocalTransform(interpolate)
+        entity.position.setLocalTransform(interpolate)
     }
 }
 
@@ -141,7 +187,7 @@ class DisappearSystem : System(EntityQuery.Companion.of(Disappear::class)) {
     override fun update(delta: Seconds, entity: Entity) {
         val disappear = entity.get(Disappear::class)
         disappear.ttl -= delta
-        if(disappear.ttl < 0f) {
+        if (disappear.ttl < 0f) {
             entity.destroy()
             return
         }
@@ -284,11 +330,14 @@ class MyGame(override val gameContext: GameContext) : Game {
         return listOf(
             PlayerSystem(),
             MovableSystem(),
+        //
+            //    InterpolationSystem(),
             GeneratorSystem(),
             HitSystem(),
             ScoreSystem(),
             DisappearSystem(),
-            SquareHitSystem()
+            SquareHitSystem(),
+            DebugSystem()
         )
     }
 }
