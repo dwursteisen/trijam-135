@@ -6,6 +6,8 @@ import com.curiouscreature.kotlin.math.translation
 import com.github.dwursteisen.minigdx.GameContext
 import com.github.dwursteisen.minigdx.Seconds
 import com.github.dwursteisen.minigdx.ecs.Engine
+import com.github.dwursteisen.minigdx.ecs.components.Camera
+import com.github.dwursteisen.minigdx.ecs.components.CameraComponent
 import com.github.dwursteisen.minigdx.ecs.components.Component
 import com.github.dwursteisen.minigdx.ecs.components.HorizontalAlignment
 import com.github.dwursteisen.minigdx.ecs.components.TextComponent
@@ -27,6 +29,7 @@ import com.github.dwursteisen.minigdx.imgui.ImGuiSystem
 import com.github.dwursteisen.minigdx.input.Key
 import com.github.dwursteisen.minigdx.math.ImmutableVector3
 import com.github.dwursteisen.minigdx.math.Interpolations
+import com.github.dwursteisen.minigdx.math.Vector3
 import com.github.minigdx.imgui.WidgetBuilder
 import kotlin.math.max
 import kotlin.math.min
@@ -37,6 +40,7 @@ class Player : Component
 class Circle(var touched: Boolean = false) : Component
 class Square(var touched: Boolean = false) : Component
 class Movable(var speed: Float = -4f) : Component
+class Vibrate(var ttl: Float = 0.5f, var translation: Vector3) : Component
 
 class Generator : Component
 class Hit : Component
@@ -92,6 +96,33 @@ class DebugSystem : ImGuiSystem() {
     }
 }
 
+class VibrateSystem : System(EntityQuery.of(Vibrate::class)) {
+
+    val camera by interested(EntityQuery(include = listOf(CameraComponent::class), exclude = listOf(Vibrate::class)))
+
+    override fun update(delta: Seconds, entity: Entity) {
+        val v = entity.get(Vibrate::class)
+        if(v.ttl < 0f) {
+            entity.position.setLocalTranslation(v.translation)
+            entity.remove(Vibrate::class)
+            return
+        }
+
+        v.ttl -= delta
+        entity.position.setLocalTranslation(v.translation
+            .copy()
+            .add(x = Random.nextFloat() * 0.1f, y = Random.nextFloat() * 0.1f)
+        )
+    }
+
+    override fun onEvent(event: Event, entityQuery: EntityQuery?) {
+        if(event is HitCircle) {
+            camera.forEach {
+                it.add(Vibrate(translation = it.position.localTranslation.mutable()))
+            }
+        }
+    }
+}
 class ScoreSystem : System(EntityQuery.of(Score::class)) {
 
     var score = 0
@@ -316,7 +347,7 @@ class MyGame(override val gameContext: GameContext) : Game {
                     add(TargetSquare(transformation))
                 }
             } else if (node.name.startsWith("score")) {
-                val entity = entityFactory.createText("00000", font, node)
+                val entity = entityFactory.createText("0000", font, node)
                 entity.get(TextComponent::class).horizontalAlign = HorizontalAlignment.Center
                 entity.add(Score())
             } else {
@@ -330,14 +361,13 @@ class MyGame(override val gameContext: GameContext) : Game {
         return listOf(
             PlayerSystem(),
             MovableSystem(),
-        //
-            //    InterpolationSystem(),
             GeneratorSystem(),
             HitSystem(),
             ScoreSystem(),
             DisappearSystem(),
             SquareHitSystem(),
-            DebugSystem()
+            DebugSystem(),
+            VibrateSystem()
         )
     }
 }
