@@ -1,16 +1,16 @@
 package your.game
 
 import com.curiouscreature.kotlin.math.Mat4
-import com.curiouscreature.kotlin.math.min
-import com.curiouscreature.kotlin.math.translation
+import com.dwursteisen.minigdx.scene.api.relation.ObjectType
 import com.github.dwursteisen.minigdx.GameContext
 import com.github.dwursteisen.minigdx.Seconds
 import com.github.dwursteisen.minigdx.ecs.Engine
-import com.github.dwursteisen.minigdx.ecs.components.Camera
 import com.github.dwursteisen.minigdx.ecs.components.CameraComponent
 import com.github.dwursteisen.minigdx.ecs.components.Component
 import com.github.dwursteisen.minigdx.ecs.components.HorizontalAlignment
 import com.github.dwursteisen.minigdx.ecs.components.TextComponent
+import com.github.dwursteisen.minigdx.ecs.components.particles.ParticleConfiguration
+import com.github.dwursteisen.minigdx.ecs.components.particles.ParticleEmitterComponent
 import com.github.dwursteisen.minigdx.ecs.components.text.WriteText
 import com.github.dwursteisen.minigdx.ecs.entities.Entity
 import com.github.dwursteisen.minigdx.ecs.entities.EntityFactory
@@ -29,6 +29,7 @@ import com.github.dwursteisen.minigdx.imgui.ImGuiSystem
 import com.github.dwursteisen.minigdx.input.Key
 import com.github.dwursteisen.minigdx.math.ImmutableVector3
 import com.github.dwursteisen.minigdx.math.Interpolations
+import com.github.dwursteisen.minigdx.math.Noise
 import com.github.dwursteisen.minigdx.math.Vector3
 import com.github.minigdx.imgui.WidgetBuilder
 import kotlin.math.max
@@ -40,7 +41,12 @@ class Player : Component
 class Circle(var touched: Boolean = false) : Component
 class Square(var touched: Boolean = false) : Component
 class Movable(var speed: Float = -4f) : Component
-class Vibrate(var ttl: Float = 0.5f, var translation: Vector3) : Component
+class Vibrate(
+    var ttl: Float = 0.5f,
+    var seed: Float = Random.nextFloat(),
+    var trauma: Float = 0.8f,
+    var translation: Vector3
+) : Component
 
 class Generator : Component
 class Hit : Component
@@ -102,27 +108,35 @@ class VibrateSystem : System(EntityQuery.of(Vibrate::class)) {
 
     override fun update(delta: Seconds, entity: Entity) {
         val v = entity.get(Vibrate::class)
-        if(v.ttl < 0f) {
+        if (v.ttl < 0f) {
             entity.position.setLocalTranslation(v.translation)
             entity.remove(Vibrate::class)
             return
         }
 
         v.ttl -= delta
-        entity.position.setLocalTranslation(v.translation
-            .copy()
-            .add(x = Random.nextFloat() * 0.1f, y = Random.nextFloat() * 0.1f)
+        entity.position.setLocalTranslation(
+            v.translation
+                .copy()
+                .add(x = v.trauma * Noise.noise(v.seed, v.ttl, 0f), y = v.trauma * Noise.noise(v.seed + 1f, v.ttl, 0f))
         )
+        v.trauma = max(0f, v.trauma - 0.2f * delta)
     }
 
     override fun onEvent(event: Event, entityQuery: EntityQuery?) {
-        if(event is HitCircle) {
+        if (event is HitCircle) {
             camera.forEach {
-                it.add(Vibrate(translation = it.position.localTranslation.mutable()))
+                if(it.hasComponent(Vibrate::class)) {
+                    val v = it.get(Vibrate::class)
+                    v.trauma  = min(v.trauma + 0.2f, 1.0f)
+                } else {
+                    it.add(Vibrate(translation = it.position.localTranslation.mutable()))
+                }
             }
         }
     }
 }
+
 class ScoreSystem : System(EntityQuery.of(Score::class)) {
 
     var score = 0
@@ -153,13 +167,15 @@ class HitSystem : System(EntityQuery.of(Hit::class)) {
 
     override fun update(delta: Seconds, entity: Entity) {
 
-        if (collider.collide(entity, players.first())) {
+        val player = players.first()
+        if (collider.collide(entity, player)) {
             val target =
                 circles.filter { !it.get(Circle::class).touched }.firstOrNull { collider.collide(entity, it) }
             if (target != null) {
                 target.get(Circle::class).touched = true
                 target.add(Disappear())
                 target.get(Movable::class).speed = -2f
+                player.chidren.first().get(ParticleEmitterComponent::class).emit()
                 emit(HitCircle)
             } else {
                 val target =
@@ -321,6 +337,15 @@ class MyGame(override val gameContext: GameContext) : Game {
             } else if (node.name.startsWith("player")) {
                 val entity = entityFactory.createFromNode(node)
                 entity.add(Player())
+
+                entityFactory.createParticles(ParticleConfiguration.spark(
+                    factory = { entityFactory.createFromNode(node).apply {
+                        this.position.setLocalScale(y = 0.5f)
+                    } },
+                    velocity = 2f,
+                    numberOfParticles = 3,
+                    ttl = 0.3f
+                )).attachTo(entity)
             } else if (node.name.startsWith("destroy")) {
                 val entity = entityFactory.createFromNode(node)
                 entity.add(Destroy())
@@ -341,7 +366,7 @@ class MyGame(override val gameContext: GameContext) : Game {
                     entity.add(Movable())
                     entity
                 }
-            }else if(node.name.startsWith("targetSquare")) {
+            } else if (node.name.startsWith("targetSquare")) {
                 entityFactory.create {
                     val transformation = node.combinedTransformation
                     add(TargetSquare(transformation))
@@ -366,8 +391,7 @@ class MyGame(override val gameContext: GameContext) : Game {
             ScoreSystem(),
             DisappearSystem(),
             SquareHitSystem(),
-            DebugSystem(),
-            VibrateSystem()
+            DebugSystem()
         )
     }
 }
