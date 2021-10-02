@@ -26,7 +26,7 @@ fun main() {
         gameConfigurationFactory = {
             GameConfiguration(
                 // Configure how the game will be rendered in the canvas
-                gameScreenConfiguration = GameScreenConfiguration.WithRatio(16f / 9f),
+                gameScreenConfiguration = GameScreenConfiguration.WithRatio(9f / 16f),
                 // What canvas to use to render the game
                 canvas = canvas as HTMLCanvasElement,
                 // What root path to use. It's use so minigdx can access to resources with the correct URL.

@@ -5,12 +5,13 @@ import com.dwursteisen.minigdx.scene.api.relation.ObjectType
 import com.github.dwursteisen.minigdx.GameContext
 import com.github.dwursteisen.minigdx.Seconds
 import com.github.dwursteisen.minigdx.ecs.Engine
-import com.github.dwursteisen.minigdx.ecs.components.CameraComponent
+import com.github.dwursteisen.minigdx.ecs.components.Color
 import com.github.dwursteisen.minigdx.ecs.components.Component
 import com.github.dwursteisen.minigdx.ecs.components.HorizontalAlignment
 import com.github.dwursteisen.minigdx.ecs.components.TextComponent
 import com.github.dwursteisen.minigdx.ecs.components.particles.ParticleConfiguration
 import com.github.dwursteisen.minigdx.ecs.components.particles.ParticleEmitterComponent
+import com.github.dwursteisen.minigdx.ecs.components.text.WaveEffect
 import com.github.dwursteisen.minigdx.ecs.components.text.WriteText
 import com.github.dwursteisen.minigdx.ecs.entities.Entity
 import com.github.dwursteisen.minigdx.ecs.entities.EntityFactory
@@ -24,15 +25,17 @@ import com.github.dwursteisen.minigdx.file.Font
 import com.github.dwursteisen.minigdx.file.Texture
 import com.github.dwursteisen.minigdx.file.get
 import com.github.dwursteisen.minigdx.game.Game
+import com.github.dwursteisen.minigdx.game.Storyboard.replaceWith
+import com.github.dwursteisen.minigdx.game.Storyboard.stayHere
+import com.github.dwursteisen.minigdx.game.StoryboardAction
+import com.github.dwursteisen.minigdx.game.StoryboardEvent
 import com.github.dwursteisen.minigdx.graph.GraphScene
 import com.github.dwursteisen.minigdx.imgui.ImGuiSystem
 import com.github.dwursteisen.minigdx.input.Key
 import com.github.dwursteisen.minigdx.math.ImmutableVector3
 import com.github.dwursteisen.minigdx.math.Interpolations
-import com.github.dwursteisen.minigdx.math.Noise
 import com.github.dwursteisen.minigdx.math.Vector3
 import com.github.minigdx.imgui.WidgetBuilder
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -64,30 +67,7 @@ class CreateSquare(var position: ImmutableVector3) : Event
 
 object HitCircle : Event
 object HitSquare : Event
-class StopGame(score: Int) : Event
-
-class InterpolationSystem : System(EntityQuery.of(Blend::class)) {
-
-    val squares by interested(EntityQuery.of(Square::class))
-
-    override fun update(delta: Seconds, entity: Entity) {
-        val (a, b) = squares
-
-        val blend = entity.get(Blend::class).percent
-        val interpo = Interpolations.interpolate(b.position.localTransformation, a.position.localTransformation, blend)
-        // entity.position.setLocalScale(interpo.scale.x, interpo.scale.y, interpo.scale.z)
-        // entity.position.setLocalRotation(interpo.rotation.x, interpo.rotation.y, interpo.rotation.z)
-        // entity.position.setLocalTranslation(interpo.translation.x, interpo.translation.y, interpo.translation.z)
-        entity.position.setLocalTransform(interpo)
-        if (input.isKeyPressed(Key.ARROW_RIGHT)) {
-            entity.get(Blend::class).percent += 0.3f * delta
-        } else if (input.isKeyPressed(Key.ARROW_LEFT)) {
-            entity.get(Blend::class).percent -= 0.3f * delta
-        }
-
-        entity.get(Blend::class).percent = max(0.0f, min(entity.get(Blend::class).percent, 1.0f))
-    }
-}
+class StopGame(val score: Int) : Event
 
 class DebugSystem : ImGuiSystem() {
 
@@ -97,41 +77,6 @@ class DebugSystem : ImGuiSystem() {
         builder.verticalContainer {
             blend.forEach {
                 button(label = "Blend: " + (it.get(Blend::class).percent * 100).roundToInt())
-            }
-        }
-    }
-}
-
-class VibrateSystem : System(EntityQuery.of(Vibrate::class)) {
-
-    val camera by interested(EntityQuery(include = listOf(CameraComponent::class), exclude = listOf(Vibrate::class)))
-
-    override fun update(delta: Seconds, entity: Entity) {
-        val v = entity.get(Vibrate::class)
-        if (v.ttl < 0f) {
-            entity.position.setLocalTranslation(v.translation)
-            entity.remove(Vibrate::class)
-            return
-        }
-
-        v.ttl -= delta
-        entity.position.setLocalTranslation(
-            v.translation
-                .copy()
-                .add(x = v.trauma * Noise.noise(v.seed, v.ttl, 0f), y = v.trauma * Noise.noise(v.seed + 1f, v.ttl, 0f))
-        )
-        v.trauma = max(0f, v.trauma - 0.2f * delta)
-    }
-
-    override fun onEvent(event: Event, entityQuery: EntityQuery?) {
-        if (event is HitCircle) {
-            camera.forEach {
-                if(it.hasComponent(Vibrate::class)) {
-                    val v = it.get(Vibrate::class)
-                    v.trauma  = min(v.trauma + 0.2f, 1.0f)
-                } else {
-                    it.add(Vibrate(translation = it.position.localTranslation.mutable()))
-                }
             }
         }
     }
@@ -198,6 +143,8 @@ class HitSystem : System(EntityQuery.of(Hit::class)) {
 
 class SquareHitSystem : System(EntityQuery.of(SquareHit::class)) {
 
+    private var score = 0
+
     override fun update(delta: Seconds, entity: Entity) {
         val squareHit = entity.get(SquareHit::class)
         squareHit.ttl -= delta
@@ -208,6 +155,16 @@ class SquareHitSystem : System(EntityQuery.of(SquareHit::class)) {
             blend = blend
         )
         entity.position.setLocalTransform(interpolate)
+
+        if (blend >= 1.0) {
+            emit(OpenMenu(score))
+        }
+    }
+
+    override fun onEvent(event: Event, entityQuery: EntityQuery?) {
+        if (event is StopGame) {
+            score = event.score
+        }
     }
 }
 
@@ -321,10 +278,64 @@ class PlayerSystem : System(EntityQuery.of(Player::class)) {
     }
 }
 
+class MyMenu(override val gameContext: GameContext, val score: Int) : Game {
+
+    private val font by gameContext.fileHandler.get<Font>("font3")
+    private val scene by gameContext.fileHandler.get<GraphScene>("circles.protobuf")
+
+    override fun createStoryBoard(event: StoryboardEvent): StoryboardAction {
+        return when (event) {
+            is CloseMenu -> replaceWith { MyGame(gameContext) }
+            else -> stayHere()
+        }
+    }
+
+    override val clearColor = Color(0f, 0f, 0f, 1f)
+
+    override fun createEntities(entityFactory: EntityFactory) {
+        scene.getAll(ObjectType.CAMERA).forEach {
+            entityFactory.createFromNode(it)
+        }
+        val content = "Score: $score\nPress <Space>\nto restart"
+        val entity = entityFactory.createText(WaveEffect(WriteText(content)), font, scene.nodes.first { it.name == "score-menu" })
+        entity.get(TextComponent::class).horizontalAlign = HorizontalAlignment.Center
+    }
+
+    override fun createSystems(engine: Engine): List<System> {
+        return listOf(
+            object : System(EntityQuery.of(TextComponent::class)) {
+
+                override fun onGameStarted(engine: Engine) {
+                    println("Open Menu $score")
+                }
+
+                override fun update(delta: Seconds, entity: Entity) = Unit
+
+                override fun update(delta: Seconds) {
+                    if (input.isKeyJustPressed(Key.SPACE)) {
+                        println("Close Menu")
+                        emit(CloseMenu())
+                    }
+                }
+            }
+        )
+    }
+}
+
+class OpenMenu(val score: Int) : StoryboardEvent
+class CloseMenu() : StoryboardEvent
+
 class MyGame(override val gameContext: GameContext) : Game {
 
     private val scene by gameContext.fileHandler.get<GraphScene>("circles.protobuf")
-    private val font by gameContext.fileHandler.get<Font>("font")
+    private val font by gameContext.fileHandler.get<Font>("font3")
+
+    override fun createStoryBoard(event: StoryboardEvent): StoryboardAction {
+        return when (event) {
+            is OpenMenu -> replaceWith { MyMenu(gameContext, event.score) }
+            else -> stayHere()
+        }
+    }
 
     override fun createEntities(entityFactory: EntityFactory) {
         // Create all entities needed at startup
@@ -338,14 +349,18 @@ class MyGame(override val gameContext: GameContext) : Game {
                 val entity = entityFactory.createFromNode(node)
                 entity.add(Player())
 
-                entityFactory.createParticles(ParticleConfiguration.spark(
-                    factory = { entityFactory.createFromNode(node).apply {
-                        this.position.setLocalScale(y = 0.5f)
-                    } },
-                    velocity = 2f,
-                    numberOfParticles = 3,
-                    ttl = 0.3f
-                )).attachTo(entity)
+                entityFactory.createParticles(
+                    ParticleConfiguration.spark(
+                        factory = {
+                            entityFactory.createFromNode(node).apply {
+                                this.position.setLocalScale(y = 0.5f)
+                            }
+                        },
+                        velocity = 2f,
+                        numberOfParticles = 6,
+                        ttl = 0.15f
+                    )
+                ).attachTo(entity)
             } else if (node.name.startsWith("destroy")) {
                 val entity = entityFactory.createFromNode(node)
                 entity.add(Destroy())
@@ -372,9 +387,12 @@ class MyGame(override val gameContext: GameContext) : Game {
                     add(TargetSquare(transformation))
                 }
             } else if (node.name.startsWith("score")) {
-                val entity = entityFactory.createText("0000", font, node)
-                entity.get(TextComponent::class).horizontalAlign = HorizontalAlignment.Center
-                entity.add(Score())
+                // ignore the other score box...
+                if (node.name == "score") {
+                    val entity = entityFactory.createText("0000", font, node)
+                    entity.get(TextComponent::class).horizontalAlign = HorizontalAlignment.Center
+                    entity.add(Score())
+                }
             } else {
                 entityFactory.createFromNode(node)
             }

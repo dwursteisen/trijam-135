@@ -6,4 +6,5 @@ plugins {
 
 minigdx {
     jvm.mainClass.set("your.game.Main")
+    version.set("DEV-SNAPSHOT")
 }
