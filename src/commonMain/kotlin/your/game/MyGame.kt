@@ -296,7 +296,7 @@ class MyMenu(override val gameContext: GameContext, val score: Int) : Game {
         scene.getAll(ObjectType.CAMERA).forEach {
             entityFactory.createFromNode(it)
         }
-        val content = "Score: $score\nPress <Space>\nto restart"
+        val content = "Score: $score\nPress <Space> to restart"
         val entity = entityFactory.createText(WaveEffect(WriteText(content)), font, scene.nodes.first { it.name == "score-menu" })
         entity.get(TextComponent::class).horizontalAlign = HorizontalAlignment.Center
     }
